@@ -1,0 +1,17 @@
+# secrets — never commit
+.env
+cookies.txt
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# dataset output (videos, db, metadata)
+dataset/
+*.db
+*.db.bak
+rescore_rejects.txt
+
+# tooling state
+.omc/
