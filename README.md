@@ -141,21 +141,7 @@ dataset/
 | `--mode rescore` | Re-score every stored row with the current engine (no API). Add `--delete-junk` to remove already-downloaded files that now fail. |
 | `--mode enrich` | Backfill metadata (duration, stats, etc.) for existing rows and integrity-check downloaded files. |
 
-### Useful flags
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--query-file FILE` | — | Load queries from a file |
-| `--query "..."` | — | A single query (repeatable) |
-| `--max-per-query N` | 25 | Results per query |
-| `--threshold X` | 0.35 | Min relevance score (0–1) to keep |
-| `--out DIR` | `dataset` | Output directory |
-| `--max-height N` | 0 (no cap) | Cap resolution, e.g. `720` |
-| `--max-seconds N` | 0 (no cap) | Skip clips longer than N seconds |
-| `--rps X` | 1.0 | Max outbound requests/sec |
-| `--proxy URL` | — | Proxy for API + download legs |
-| `--cookies FILE` | from `.env` | Netscape cookies file |
-| `--impersonate chrome` | chrome | Browser TLS fingerprint |
+A complete flag reference is in the [Tuning](#tuning-the-scorer) section below.
 
 ---
 
@@ -168,6 +154,56 @@ Relevance is driven by keyword weight tables (`STRONG`, `CONTEXT`, `NEGATIVE`) a
 3. Adjust weights or `--threshold`, then `--mode rescore` to re-apply to the queue.
 
 See `cctv_dataset_plan.md` for the full design rationale.
+
+### In-code tuning constants
+
+These live near the top of `youtube_scraper.py` and govern scoring/download behavior. Edit them directly:
+
+| Constant | Default | What it controls |
+|----------|---------|------------------|
+| `STRONG` | dict | Strong positive keywords (camera types, "home security") |
+| `CONTEXT` | dict | Residential context keywords (porch, driveway, intruder…) |
+| `NEGATIVE` | dict | Negative keywords (ads, tutorials, creepy/horror, non-residential) |
+| `CHANNEL_BLOCK` | set | Channel-title substrings to penalize (horror/comedy/product) |
+| `CHANNEL_PENALTY` | `-3.0` | Score penalty applied to a blocked channel (effectively a veto) |
+| `FIELD_WEIGHT` | `1.0 / 0.7 / 0.3` | Weight of title / tags / description matches |
+| `POS_CAP_PER_FIELD` | `2.0` | Max positive contribution per field (stops keyword-stuffing) |
+| `NEG_CAP_PER_FIELD` | `2.5` | Max negative contribution per field |
+| `DEFAULT_THRESHOLD` | `0.35` | Keep videos scoring ≥ this (override with `--threshold`) |
+| `MIN_FILE_BYTES` | `100_000` | Downloaded files smaller than this are marked `failed` |
+
+Download / anti-bot defaults live in the `DownloadOpts` dataclass and are all overridable by CLI flags:
+
+| Field | Default | Flag |
+|-------|---------|------|
+| `impersonate` | `chrome` | `--impersonate` |
+| `player_clients` | `tv,web_safari,web` | `--player-clients` |
+| `sleep_min,sleep_max` | `2.0, 6.0` | `--dl-sleep min,max` |
+| `max_height` | `0` (no cap) | `--max-height` |
+| `max_seconds` | `0` (no cap) | `--max-seconds` |
+
+### Full CLI flag list
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--mode` | `full` | `discover` / `download` / `full` / `eval` / `rescore` / `enrich` |
+| `--query "..."` | — | A single query (repeatable) |
+| `--query-file FILE` | — | Load queries from a file |
+| `--max-per-query N` | 25 | Results per query |
+| `--threshold X` | 0.35 | Min relevance score (0–1) to keep |
+| `--out DIR` | `dataset` | Output directory |
+| `--rps X` | 1.0 | Max outbound requests/sec (token bucket) |
+| `--refresh-seconds N` | 0 | Skip a query if searched within this window |
+| `--proxy URL` | from `DATASET_PROXY` | Proxy for API + download legs |
+| `--cookies FILE` | from `YOUTUBE_COOKIES` | Netscape cookies file |
+| `--cookies-from-browser B` | from env | Pull cookies live from a browser |
+| `--impersonate NAME` | chrome | Browser TLS fingerprint (`''` to disable) |
+| `--player-clients LIST` | tv,web_safari,web | yt-dlp player_client fallback chain |
+| `--dl-sleep min,max` | 2,6 | Randomized per-download sleep seconds |
+| `--max-height N` | 0 | Cap resolution (0 = no cap) |
+| `--max-seconds N` | 0 | Cap duration (0 = no cap) |
+| `--labels FILE` | — | Labeled CSV for `--mode eval` |
+| `--delete-junk` | off | In `rescore`, delete downloaded files that now fail |
 
 ---
 
