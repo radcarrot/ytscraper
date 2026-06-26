@@ -89,8 +89,26 @@ CONTEXT = {  # residential signals — these are what make it a HOME video
     "neighborhood": 0.4, "suburb": 0.4, "my house": 0.7, "my home": 0.7,
     "caught on camera": 0.5, "caught on cctv": 0.5, "porch pirate": 0.8,
     "package thief": 0.8, "home invasion": 0.7, "burglar": 0.5, "intruder": 0.5,
-    "trespasser": 0.5, "front gate": 0.5,
+    "trespasser": 0.5, "trespass": 0.5, "front gate": 0.5,
+    # indoor rooms / roles — event-free interior home footage
+    "indoor": 0.4, "living room": 0.6, "kitchen": 0.5, "bedroom": 0.5,
+    "hallway": 0.4, "nursery": 0.5, "inside my house": 0.7, "inside my home": 0.7,
+    "nanny cam": 0.7, "baby monitor": 0.5, "pet cam": 0.6, "pet camera": 0.6,
+    # night / recording mode. NOTE: 'night vision'/'infrared'/'live feed|cam|stream'
+    # REMOVED from positives (2026-06-26 hand-label analysis) — title hits on these
+    # are only ~22-23% keep (product-spec + idle-stream language), so boosting them
+    # cost precision. Now neutral; 'night vision camera' is a NEGATIVE below.
+    "motion detection": 0.3, "time lapse": 0.4,
+    "caught on tape": 0.5, "overnight": 0.4,
 }
+# NOTE: pure wildlife / trail-cam footage is NOT wanted — this dataset is for a
+# home-security model, not nature. Animal-at-the-door clips still pass via the
+# home/doorbell CONTEXT words; standalone wildlife/trail-cam is pushed down by
+# the NEGATIVE entries below.
+
+# Near-duplicate detection: two clips whose frame dhashes differ by <= this many
+# bits (Hamming, out of 64) are treated as the same video. ~5 is a safe default.
+PHASH_MAX_DISTANCE = 5
 NEGATIVE = {
     # content that isn't real residential footage
     "gameplay": -1.5, "movie": -1.2, "film": -1.0, "trailer": -1.2, "music": -1.2,
@@ -104,6 +122,11 @@ NEGATIVE = {
     "hospital": -0.8, "restaurant": -0.8, "hotel": -0.8, "traffic": -1.2,
     "highway": -1.2, "road accident": -1.2, "dashcam": -1.2, "dash cam": -1.2,
     "city cctv": -0.8, "subway": -1.0, "airport": -1.0, "parking lot": -0.7,
+    # pure wildlife / trail-cam / nature — NOT wanted (home-security dataset).
+    # Animal-at-a-home clips still pass via home/doorbell CONTEXT words.
+    "trail cam": -1.5, "trail camera": -1.5, "wildlife": -1.2, "wilderness": -1.5,
+    "nature cam": -1.2, "bird feeder": -1.2, "game camera": -1.5, "safari": -1.5,
+    "national park": -1.5, "in the wild": -1.2,
     # product listings / ads / reviews of cameras (not footage)
     "auto-tracking": -1.2, "auto tracking": -1.2, "ai alerts": -1.2,
     "person detection": -1.0,  # NOTE: 'night vision'/'motion detection' removed —
@@ -115,6 +138,11 @@ NEGATIVE = {
     "only in": -1.0, "discount": -1.0, "amazon link": -1.0, "best budget": -1.2,
     "vs ": -0.9, " vs ": -0.9, "comparison": -0.9, "specs": -1.0, "megapixel": -1.0,
     "resolution": -0.6, "buyer": -0.8, "lifehack": -1.0,
+    # plural/product phrasings surfaced by hand-label analysis (2026-06-26): title
+    # hits on these are <25% keep — listicles, spec sheets, "camera for home" ads.
+    # ('security cameras'/'cctv camera' still net-positive via STRONG, just damped.)
+    "security cameras": -0.8, "cctv camera": -0.6, "night vision camera": -1.0,
+    "camera for home": -1.0, "for home": -0.6, "wifi": -0.6,
     # common camera brand/product names (ads, not residential footage)
     "tapo": -1.2, "qubo": -1.2, "eufy": -1.2, "aosu": -1.2, "tp-link": -1.2,
     "hikvision": -1.0, "cp plus": -1.2, "imou": -1.2, "reolink": -1.0,
@@ -139,6 +167,15 @@ NEGATIVE = {
     # product / system ads still leaking via stuffed descriptions
     "camera system": -1.2, "camera under": -1.5, "which is right for": -1.5,
     "home camera system": -1.5, "24/7": -1.0, "subscribe": -1.0, "giveaway": -1.5,
+    # ad-speak that appears in PRODUCT promos but not in real-footage titles.
+    # Tuned against hand-labeled false positives: these are pure ads with NO
+    # CCTV footage, so pushing them down doesn't cost any footage we want.
+    "smart doorbell": -1.2, "smart home": -0.9, "must-have": -1.3, "must have": -1.3,
+    "game changer": -1.5, "meet the": -1.2, "remote monitoring": -1.3,
+    "monitor visitors": -1.3, "without subscription": -1.3, "you need": -1.2,
+    "what's inside": -1.5, "whats inside": -1.5, "spy camera": -1.3,
+    "spy magnet": -1.5, "ultimate": -0.8, "saved my home": -1.3, "3rd gen": -1.3,
+    "remote view": -1.0, "high hd": -1.2, "1080p": -1.0, "2mp": -1.0, "4mp": -1.0,
     # clickbait hooks
     "at 3 am": -1.0, "3am": -1.0, "i'm speechless": -1.2, "speechless": -1.0,
     "you need to see": -1.2, "wait for it": -1.0,
@@ -197,16 +234,25 @@ class VideoMeta:
     ext: str = ""
     filesize_mb: float = 0.0
     actual_duration: int = 0       # from the media file (may differ from API)
+    phash: str = ""                # perceptual dhash (hex) of a sampled frame
+    src_query: str = ""            # discover query that surfaced this video
+    score_terms: str = ""          # json: keywords that drove the score (analysis)
 
 
 # Channels that almost exclusively post horror/creepy, comedy/reaction, or
 # product content — higher-signal than keywords. Matched case-insensitively as
 # substrings of the channel title. A hit applies CHANNEL_PENALTY.
 CHANNEL_BLOCK = {
-    "mr. nightmare", "nightmare", "chilling scares", "scary", "horror",
-    "lets read", "corpse", "wendigoon", "brain time", "5-minute", "5 minute",
-    "america's funniest", "afv", "fail", "funny", "comedy",
-    "unboxing", "review", "tech", "gadget", "deals",
+    # Horror/creepy/paranormal channels — fabricated or clickbait, never real
+    # footage. Safe to veto.
+    "mr. nightmare", "nightmare", "chilling scares", "horror channel",
+    "lets read", "corpse", "wendigoon",
+    # Pure product/ad channels — gear promos, no CCTV footage.
+    "unboxing", "gadget review", "tech review", "camera review", "best deals",
+    # NOTE: compilation/fails channels (America's Funniest, Brain Time, AFV,
+    # 5-Minute, etc.) are NOT blocked — they post REAL footage montages we keep.
+    # The labeling criterion is "does the clip contain CCTV footage", and these
+    # do; blocking them was dropping wanted videos (false negatives).
 }
 CHANNEL_PENALTY = -3.0  # strong; effectively vetoes a blocked channel
 
@@ -223,6 +269,27 @@ def _parse_iso8601_duration(s: str) -> int:
 def _channel_blocked(channel: str) -> bool:
     c = channel.lower()
     return any(b in c for b in CHANNEL_BLOCK)
+
+
+# TV-news channels are dropped entirely: most clips are anchor/commentary with no
+# CCTV footage, and the ones that do embed footage need manual trimming we don't
+# want. Detect US station call-signs (uppercase K/W + letters at start) plus
+# network/news terms. The user accepts losing the rare footage-bearing news clip.
+_NEWS_CALLSIGN = re.compile(r"^[KW][A-Z]{2,3}\b")
+_NEWS_TERMS = (
+    "news", "abc", "cbs", "nbc", "fox", "cnn", "ndtv", "cbc", "wion",
+    "eyewitness", "inside edition", "action news", "on your side",
+    "aaj tak", "republic tv", "telemundo", "univision",
+)
+
+
+def _is_news_channel(channel: str) -> bool:
+    if not channel:
+        return False
+    if _NEWS_CALLSIGN.match(channel):  # call-signs are uppercase, match raw case
+        return True
+    c = channel.lower()
+    return any(t in c for t in _NEWS_TERMS)
 
 
 def _norm_title(title: str) -> str:
@@ -244,6 +311,33 @@ def _squash(x: float) -> float:
     return max(0.0, min(1.0, x / (1.0 + abs(x)) * 1.5 + 0.0)) if x > 0 else 0.0
 
 
+def score_breakdown(meta: VideoMeta) -> tuple[float, dict]:
+    """Like score_metadata but also returns WHICH keywords fired, for later
+    analysis. The dict is {"pos":[[field,kw,weight],...], "neg":[...],
+    optional "channel_penalty":w}. Terms are the raw matches (pre field-cap), so
+    cross-reference POS_CAP_PER_FIELD / NEG_CAP_PER_FIELD when summing by hand.
+    """
+    fields = {
+        "title": meta.title.lower(),
+        "tags": " ".join(meta.tags).lower(),
+        "description": meta.description.lower(),
+    }
+    raw = 0.0
+    hits: dict = {"pos": [], "neg": []}
+    for fname, text in fields.items():
+        fw = FIELD_WEIGHT[fname]
+        pos_terms = [(kw, w) for kw, w in _POSWORDS.items() if kw in text]
+        neg_terms = [(kw, w) for kw, w in NEGATIVE.items() if kw in text]
+        raw += min(sum(w for _, w in pos_terms), POS_CAP_PER_FIELD) * fw
+        raw += max(sum(w for _, w in neg_terms), -NEG_CAP_PER_FIELD) * fw
+        hits["pos"] += [[fname, kw, w] for kw, w in pos_terms]
+        hits["neg"] += [[fname, kw, w] for kw, w in neg_terms]
+    if meta.channel and _channel_blocked(meta.channel):
+        raw += CHANNEL_PENALTY
+        hits["channel_penalty"] = CHANNEL_PENALTY
+    return round(_squash(raw), 4), hits
+
+
 def score_metadata(meta: VideoMeta) -> float:
     """Weighted keyword match across title / tags / description -> 0..1.
 
@@ -252,21 +346,7 @@ def score_metadata(meta: VideoMeta) -> float:
     Negative hits are full-strength and uncapped (counted in any field) so a
     junk signal vetoes an otherwise-stuffed entry.
     """
-    fields = {
-        "title": meta.title.lower(),
-        "tags": " ".join(meta.tags).lower(),
-        "description": meta.description.lower(),
-    }
-    raw = 0.0
-    for fname, text in fields.items():
-        fw = FIELD_WEIGHT[fname]
-        pos = sum(w for kw, w in _POSWORDS.items() if kw in text)
-        neg = sum(w for kw, w in NEGATIVE.items() if kw in text)  # negative sum
-        raw += min(pos, POS_CAP_PER_FIELD) * fw
-        raw += max(neg, -NEG_CAP_PER_FIELD) * fw
-    if meta.channel and _channel_blocked(meta.channel):
-        raw += CHANNEL_PENALTY
-    return round(_squash(raw), 4)
+    return score_breakdown(meta)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +388,11 @@ def evaluate(labels_csv: Path, threshold: float) -> None:
 
     if not rows:
         sys.exit("labels CSV has no data rows.")
+    _report_eval(rows, threshold)
 
+
+def _report_eval(rows: list[tuple[bool, float]], threshold: float) -> None:
+    """Print precision/recall/F1 + a threshold sweep for (truth, score) rows."""
     def confusion(th: float) -> tuple[int, int, int, int]:
         tp = fp = fn = tn = 0
         for truth, sc in rows:
@@ -344,6 +428,171 @@ def evaluate(labels_csv: Path, threshold: float) -> None:
           f"(current default {DEFAULT_THRESHOLD}).")
 
 
+def evaluate_db(store: Store, threshold: float) -> None:
+    """Evaluate the scorer against HUMAN labels stored in the DB (set via
+    label_app.py). This is real validation — your judgment vs. the scorer —
+    unlike the synthetic sample CSV."""
+    cur = store.db.execute(
+        "SELECT title, description, tags, channel, score, human_label FROM videos "
+        "WHERE human_label IS NOT NULL")
+    rows: list[tuple[bool, float]] = []
+    for r in cur.fetchall():
+        # re-score live so eval reflects the CURRENT engine, not the stored score
+        meta = VideoMeta("", "", "", r["title"] or "", r["description"] or "",
+                         json.loads(r["tags"] or "[]"), channel=r["channel"] or "")
+        rows.append((bool(r["human_label"]), score_metadata(meta)))
+    if not rows:
+        sys.exit("No human-labeled rows yet. Run: python label_app.py --out <dir>")
+    print(f"evaluating against {len(rows)} HUMAN-labeled videos from the DB\n")
+    _report_eval(rows, threshold)
+
+
+# ---------------------------------------------------------------------------
+# Local LLM classifier (Ollama / Gemma). Reads ONLY metadata — title, desc,
+# tags, channel — and judges keep/skip semantically. Stdlib urllib, no new dep.
+# Used to bake-off against the keyword scorer on the human-labeled set.
+# ---------------------------------------------------------------------------
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+OLLAMA_MODEL = "gemma3:4b"
+
+_LLM_SYSTEM = (
+    "You classify YouTube videos for a RESIDENTIAL home-security CCTV dataset, "
+    "using ONLY the metadata. The ONE question that decides it: does the video "
+    "CONTAIN actual home-security / CCTV / doorbell camera footage of a house, "
+    "yard, porch, driveway, or home interior?\n\n"
+    "KEEP if the video shows such footage — REGARDLESS of anything else. "
+    "Specifically, these are NOT reasons to skip, keep them if footage is shown:\n"
+    "  - monetization: affiliate/Amazon links, 'subscribe', merch, promo codes\n"
+    "  - format: compilations, 'funniest'/'fails'/'caught in 4K'/karma/comedy montages\n"
+    "  - news clips that play real security-camera footage of the incident\n"
+    "  - AI-generated or recreated clips, AS LONG AS they look like CCTV footage\n"
+    "  - quiet/ambient footage with no event; wildlife on a home camera\n\n"
+    "SKIP only when the video does NOT contain residential camera footage:\n"
+    "  - product reviews / unboxings / buying guides / ads ABOUT a camera "
+    "(the video is gear talk, not footage)\n"
+    "  - store / traffic / business CCTV, dashcam\n"
+    "  - pure talking-head news or commentary with no camera footage shown\n"
+    "  - tutorials / app how-tos\n\n"
+    "Judge by what the video CONTAINS, not by whether it also sells something. "
+    "A funny doorbell compilation with Amazon links is KEEP (it shows footage). "
+    "A review of a doorbell camera is SKIP (it shows the product, not footage). "
+    "Reply ONLY with JSON: "
+    '{"label":"keep"|"skip","confidence":0.0-1.0,"reason":"<short>"}'
+)
+
+
+def llm_classify(title: str, description: str, tags: list[str], channel: str,
+                 model: str = OLLAMA_MODEL, timeout: float = 60.0
+                 ) -> tuple[int, float, str]:
+    """Classify one video via the local Ollama chat API. Returns
+    (label 1/0, confidence 0..1, reason). Raises RuntimeError if Ollama is
+    unreachable so the caller can stop with a clear message."""
+    import urllib.request
+    import urllib.error
+
+    user = (
+        f"Title: {title}\n"
+        f"Channel: {channel}\n"
+        f"Tags: {', '.join(tags) if tags else '(none)'}\n"
+        f"Description: {(description or '(none)')[:1500]}"
+    )
+    options = {"temperature": 0.0}
+    # Optional GPU/CPU split: OLLAMA_NUM_GPU = number of layers to offload to the
+    # GPU (rest run on CPU/RAM). Use a partial value when the model is bigger than
+    # VRAM (0 = all CPU). Applied per-request, no Ollama restart needed.
+    _ngpu = os.environ.get("OLLAMA_NUM_GPU")
+    if _ngpu is not None and _ngpu.strip() != "":
+        try:
+            options["num_gpu"] = int(_ngpu)
+        except ValueError:
+            pass
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _LLM_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        "stream": False,
+        "format": "json",
+        "options": options,
+    }).encode("utf-8")
+    req = urllib.request.Request(OLLAMA_URL, data=payload,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"Ollama unreachable at {OLLAMA_URL} ({e}). Start Ollama and run "
+            f"`ollama pull {model}`.") from e
+    content = (body.get("message") or {}).get("content", "")
+    try:
+        verdict = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        # model didn't return clean JSON — treat as low-confidence skip
+        return 0, 0.0, f"unparseable: {content[:80]}"
+    label = 1 if str(verdict.get("label", "")).lower().startswith("keep") else 0
+    try:
+        conf = float(verdict.get("confidence", 0.5))
+    except (TypeError, ValueError):
+        conf = 0.5
+    conf = max(0.0, min(1.0, conf))
+    reason = str(verdict.get("reason", ""))[:300]
+    return label, conf, reason
+
+
+def llm_classify_store(store: Store, model: str, relabel: bool) -> int:
+    """Classify the human-labeled rows with the LLM, caching verdicts to the DB.
+    Resumable: skips rows that already have llm_label unless relabel=True."""
+    where = "human_label IS NOT NULL"
+    if not relabel:
+        where += " AND llm_label IS NULL"
+    rows = store.db.execute(
+        f"SELECT key, title, description, tags, channel FROM videos WHERE {where}"
+    ).fetchall()
+    total_labeled = store.db.execute(
+        "SELECT count(*) FROM videos WHERE human_label IS NOT NULL").fetchone()[0]
+    if not rows:
+        print(f"all {total_labeled} labeled rows already classified "
+              f"(use --relabel to redo).")
+        return 0
+    print(f"classifying {len(rows)} rows with {model} "
+          f"({total_labeled - len(rows)} already cached)...")
+    done = 0
+    for r in rows:
+        tags = json.loads(r["tags"] or "[]")
+        label, conf, reason = llm_classify(
+            r["title"] or "", r["description"] or "", tags, r["channel"] or "", model)
+        store.db.execute(
+            "UPDATE videos SET llm_label=?, llm_confidence=?, llm_reason=? WHERE key=?",
+            (label, conf, reason, r["key"]))
+        store.db.commit()
+        done += 1
+        if done % 10 == 0 or done == len(rows):
+            print(f"  {done}/{len(rows)}")
+    return done
+
+
+def evaluate_llm(store: Store, model: str, threshold: float, relabel: bool) -> None:
+    """Classify (or reuse cached) LLM verdicts on the human-labeled set, then
+    report precision/recall/F1 of LLM-vs-human — comparable to the keyword eval.
+    Score per row = confidence if keep else 1-confidence, so the sweep works."""
+    llm_classify_store(store, model, relabel)
+    cur = store.db.execute(
+        "SELECT human_label, llm_label, llm_confidence FROM videos "
+        "WHERE human_label IS NOT NULL AND llm_label IS NOT NULL")
+    rows: list[tuple[bool, float]] = []
+    for r in cur.fetchall():
+        conf = r["llm_confidence"] if r["llm_confidence"] is not None else 0.5
+        score = conf if r["llm_label"] else (1.0 - conf)
+        rows.append((bool(r["human_label"]), score))
+    if not rows:
+        sys.exit("No LLM verdicts to evaluate.")
+    print(f"\nLLM ({model}) vs {len(rows)} HUMAN labels "
+          f"(keyword scorer baseline: precision 0.830 / recall 1.000 / F1 0.907)\n")
+    _report_eval(rows, threshold)
+
+
 # ---------------------------------------------------------------------------
 # §7.1 Rate limiting — token bucket + jitter. Thread-safe so a future
 # multi-worker download pool shares one budget per host.
@@ -373,6 +622,31 @@ class RateLimiter:
 
 class QuotaExceeded(RuntimeError):
     """YouTube Data API daily quota is exhausted — stop, don't retry."""
+
+
+class QuotaMeter:
+    """Track estimated Data API unit spend so a big multi-query run doesn't hit
+    a surprise hard-stop. search.list=100u, videos.list=1u. Warns near the cap
+    and raises QuotaExceeded once the local limit is crossed (0 = no local cap).
+    """
+    def __init__(self, limit: int = 10_000, warn_at: float = 0.8):
+        self.limit = limit
+        self.warn_at = warn_at
+        self.used = 0
+        self._warned = False
+
+    def charge(self, units: int, what: str) -> None:
+        self.used += units
+        if self.limit > 0:
+            if not self._warned and self.used >= self.limit * self.warn_at:
+                self._warned = True
+                print(f"  ~ quota ~{self.used}/{self.limit} units used "
+                      f"({self.used / self.limit:.0%}) — approaching daily cap.",
+                      file=sys.stderr)
+            if self.used >= self.limit:
+                raise QuotaExceeded(
+                    f"local quota cap reached (~{self.used}/{self.limit} units) "
+                    f"before {what}; raise --quota-limit or wait for daily reset.")
 
 
 # ---------------------------------------------------------------------------
@@ -418,9 +692,11 @@ def with_backoff(fn: Callable[[], T], *, what: str, max_tries: int = 5,
 class YouTubeSource:
     platform = "youtube"
 
-    def __init__(self, api_key: str, limiter: RateLimiter, proxy: str | None = None):
+    def __init__(self, api_key: str, limiter: RateLimiter, proxy: str | None = None,
+                 quota: QuotaMeter | None = None):
         from googleapiclient.discovery import build  # lazy import
         self.limiter = limiter
+        self.quota = quota or QuotaMeter(limit=0)  # 0 = no local cap
         http = self._build_http(proxy) if proxy else None
         if http is not None:
             self.yt = build("youtube", "v3", developerKey=api_key,
@@ -445,6 +721,7 @@ class YouTubeSource:
         ids: list[str] = []
         page_token = None
         while len(ids) < max_results:
+            self.quota.charge(100, f"search.list({query!r})")  # 100u each
             self.limiter.acquire()
             resp = with_backoff(
                 lambda: self.yt.search().list(
@@ -467,6 +744,7 @@ class YouTubeSource:
         out: list[VideoMeta] = []
         for i in range(0, len(ids), 50):
             chunk = ids[i:i + 50]
+            self.quota.charge(1, "videos.list")  # 1u regardless of parts/ids
             self.limiter.acquire()
             resp = with_backoff(
                 lambda: self.yt.videos().list(
@@ -537,7 +815,12 @@ class Store:
         ("like_count", "INTEGER"), ("comment_count", "INTEGER"), ("thumbnail", "TEXT"),
         ("is_short", "INTEGER"), ("width", "INTEGER"), ("height", "INTEGER"),
         ("fps", "REAL"), ("ext", "TEXT"), ("filesize_mb", "REAL"),
-        ("actual_duration", "INTEGER"),
+        ("actual_duration", "INTEGER"), ("phash", "TEXT"),
+        ("human_label", "INTEGER"),  # 1/0 set by the manual labeler (label_app.py)
+        ("llm_label", "INTEGER"),    # 1/0 from the local LLM (Ollama/Gemma)
+        ("llm_confidence", "REAL"), ("llm_reason", "TEXT"),
+        ("query", "TEXT"),  # the discover query that surfaced this row (per-query analysis)
+        ("score_terms", "TEXT"),  # json: keywords that drove the score (analysis)
     ]
 
     def _init_schema(self) -> None:
@@ -585,6 +868,21 @@ class Store:
         cur = self.db.execute("SELECT 1 FROM videos WHERE norm_title=? LIMIT 1", (nt,))
         return cur.fetchone() is not None
 
+    def find_phash_dup(self, phash: str, exclude_key: str,
+                       max_dist: int = PHASH_MAX_DISTANCE) -> str | None:
+        """Return the key of an already-stored video whose frame dhash is within
+        max_dist of `phash` (a content re-upload under a different title), or None.
+        Only compares against rows that have a phash and a real file."""
+        if not phash:
+            return None
+        cur = self.db.execute(
+            "SELECT key, phash FROM videos WHERE phash IS NOT NULL AND phash<>'' "
+            "AND status='downloaded' AND key<>?", (exclude_key,))
+        for r in cur.fetchall():
+            if _phash_distance(phash, r["phash"]) <= max_dist:
+                return r["key"]
+        return None
+
     # -- §7.4 query cache ---------------------------------------------------
     def query_fresh(self, query: str, refresh_seconds: int) -> bool:
         """True if this query ran within the refresh window (skip re-searching)."""
@@ -614,8 +912,8 @@ class Store:
             "description, tags, channel, channel_id, published_at, score, status, "
             "discovered_at, norm_title, duration_sec, definition, has_caption, "
             "category_id, default_language, live_content, view_count, like_count, "
-            "comment_count, thumbnail, is_short) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "comment_count, thumbnail, is_short, query, score_terms) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (key, meta.video_id, meta.platform, meta.url, meta.title,
              meta.description, json.dumps(meta.tags), meta.channel, meta.channel_id,
              meta.published_at, meta.score, status,
@@ -623,7 +921,7 @@ class Store:
              _norm_title(meta.title), meta.duration_sec, meta.definition,
              int(meta.has_caption), meta.category_id, meta.default_language,
              meta.live_content, meta.view_count, meta.like_count, meta.comment_count,
-             meta.thumbnail, int(meta.is_short)),
+             meta.thumbnail, int(meta.is_short), meta.src_query, meta.score_terms),
         )
         self.db.commit()
         if status in ("kept", "downloaded"):
@@ -638,9 +936,10 @@ class Store:
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self.db.execute(
             "UPDATE videos SET status='downloaded', path=?, download_date=?, "
-            "width=?, height=?, fps=?, ext=?, filesize_mb=?, actual_duration=? WHERE key=?",
+            "width=?, height=?, fps=?, ext=?, filesize_mb=?, actual_duration=?, "
+            "phash=? WHERE key=?",
             (path, now, meta.width, meta.height, meta.fps, meta.ext,
-             round(meta.filesize_mb, 2), meta.actual_duration, key),
+             round(meta.filesize_mb, 2), meta.actual_duration, meta.phash, key),
         )
         self.db.commit()
         self._write_sidecar(meta)
@@ -679,7 +978,7 @@ class Store:
             is_short=bool(g("is_short")),
             width=g("width") or 0, height=g("height") or 0, fps=g("fps") or 0.0,
             ext=g("ext") or "", filesize_mb=g("filesize_mb") or 0.0,
-            actual_duration=g("actual_duration") or 0,
+            actual_duration=g("actual_duration") or 0, phash=g("phash") or "",
         )
 
     def close(self) -> None:
@@ -765,6 +1064,7 @@ def download(meta: VideoMeta, videos_dir: Path, limiter: RateLimiter,
             meta.ext = Path(path).suffix.lstrip(".")
             meta.actual_duration = int(info.get("duration") or 0)
             meta.filesize_mb = (os.path.getsize(path) / 1e6) if os.path.exists(path) else 0.0
+            meta.phash = _frame_dhash(path) or ""  # for near-dup detection
             return path
         except Exception as e:  # noqa: BLE001 - keep the run going
             print(f"  ! download failed for {meta.video_id}: {e}", file=sys.stderr)
@@ -774,6 +1074,56 @@ def download(meta: VideoMeta, videos_dir: Path, limiter: RateLimiter,
 # Minimum acceptable merged-file size; below this it's a failed/empty download.
 MIN_FILE_BYTES = 100_000  # 100 KB
 
+# Quality floors (0 = disabled). Applied at enqueue (API duration) and after
+# download (decoded height). Overridable by --min-seconds / --min-height.
+DEFAULT_MIN_SECONDS = 0
+DEFAULT_MIN_HEIGHT = 0
+
+
+def _frame_dhash(path: str) -> str | None:
+    """Perceptual 64-bit difference-hash of one sampled frame, as hex.
+
+    Extracts a single 9x8 grayscale frame via ffmpeg (no PIL needed) and builds
+    a row-wise dhash. Returns None if extraction fails (corrupt/short clip)."""
+    import subprocess
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # noqa: BLE001
+        return None
+
+    def _grab(seek: str) -> bytes:
+        cmd = [exe, "-v", "error", "-ss", seek, "-i", path, "-frames:v", "1",
+               "-vf", "scale=9:8,format=gray", "-f", "rawvideo", "-"]
+        try:
+            return subprocess.run(cmd, capture_output=True, timeout=30).stdout
+        except Exception:  # noqa: BLE001
+            return b""
+
+    raw = _grab("1")
+    if len(raw) < 72:            # short clip — try the very first frame
+        raw = _grab("0")
+    if len(raw) < 72:
+        return None
+    px = raw[:72]                # 9 wide x 8 tall, 1 byte/pixel
+    bits = 0
+    for row in range(8):
+        for col in range(8):     # 8 adjacent-column comparisons per row
+            left = px[row * 9 + col]
+            right = px[row * 9 + col + 1]
+            bits = (bits << 1) | (1 if left > right else 0)
+    return f"{bits:016x}"
+
+
+def _phash_distance(a: str, b: str) -> int:
+    """Hamming distance between two hex dhashes; 999 if either is missing."""
+    if not a or not b:
+        return 999
+    try:
+        return bin(int(a, 16) ^ int(b, 16)).count("1")
+    except ValueError:
+        return 999
+
 
 # ---------------------------------------------------------------------------
 # Orchestration — three modes (§7.3 decoupled ingestion):
@@ -782,7 +1132,8 @@ MIN_FILE_BYTES = 100_000  # 100 KB
 #   full     : both, in one pass (default; back-compat with the old behavior)
 # ---------------------------------------------------------------------------
 def discover(src: YouTubeSource, store: Store, queries: Iterable[str],
-             max_per_query: int, threshold: float, refresh_seconds: int) -> tuple[int, int]:
+             max_per_query: int, threshold: float, refresh_seconds: int,
+             min_seconds: int = 0) -> tuple[int, int]:
     kept = scanned = 0
     for q in queries:
         if store.query_fresh(q, refresh_seconds):
@@ -791,6 +1142,7 @@ def discover(src: YouTubeSource, store: Store, queries: Iterable[str],
         print(f"\n=== query: {q!r} ===")
         for meta in src.search(q, max_per_query):
             scanned += 1
+            meta.src_query = q   # tag source query before any enqueue path
             key = f"{meta.platform}:{meta.video_id}"
             if store.is_seen(key):
                 continue
@@ -798,7 +1150,14 @@ def discover(src: YouTubeSource, store: Store, queries: Iterable[str],
                 print(f"  [dup] {meta.title[:66]}")
                 store.enqueue(meta, "skipped")
                 continue
-            meta.score = score_metadata(meta)
+            # quality floor: drop clips shorter than min_seconds (when API knows
+            # the duration; duration_sec==0 means unknown, so don't filter).
+            if min_seconds and 0 < meta.duration_sec < min_seconds:
+                print(f"  [short {meta.duration_sec}s] {meta.title[:62]}")
+                store.enqueue(meta, "skipped")
+                continue
+            meta.score, _terms = score_breakdown(meta)
+            meta.score_terms = json.dumps(_terms, ensure_ascii=False)
             keep = meta.score >= threshold
             print(f"  [{'KEEP' if keep else 'skip'} {meta.score:.2f}] {meta.title[:70]}")
             store.enqueue(meta, "kept" if keep else "skipped")
@@ -807,10 +1166,11 @@ def discover(src: YouTubeSource, store: Store, queries: Iterable[str],
     return scanned, kept
 
 
-def drain_downloads(store: Store, limiter: RateLimiter, cfg: DownloadOpts) -> int:
+def drain_downloads(store: Store, limiter: RateLimiter, cfg: DownloadOpts,
+                    min_height: int = 0) -> int:
     pending = store.pending_downloads()
     print(f"\n=== download queue: {len(pending)} pending ===")
-    done = failed = 0
+    done = failed = dropped = 0
     for meta in pending:
         path = download(meta, store.videos_dir, limiter, cfg)
         # integrity check: a real video must exist and clear the size floor
@@ -820,11 +1180,26 @@ def drain_downloads(store: Store, limiter: RateLimiter, cfg: DownloadOpts) -> in
                 os.remove(path)  # drop the empty/partial artifact
             failed += 1
             continue
+        # quality floor: drop low-resolution clips below min_height
+        if min_height and 0 < meta.height < min_height:
+            os.remove(path)
+            store.mark_failed(meta, f"below {min_height}p ({meta.height}p)")
+            dropped += 1
+            continue
+        # near-duplicate: same content re-uploaded under a different title
+        key = f"{meta.platform}:{meta.video_id}"
+        dup = store.find_phash_dup(meta.phash, key)
+        if dup:
+            os.remove(path)
+            store.mark_failed(meta, f"phash-dup of {dup}")
+            print(f"  [dup~] {meta.video_id} matches {dup} — dropped")
+            dropped += 1
+            continue
         store.mark_downloaded(meta, path)
         done += 1
         print(f"  + {meta.video_id} -> {path}  ({meta.width}x{meta.height}, "
               f"{meta.filesize_mb:.1f}MB, {meta.actual_duration}s)")
-    print(f"  ({done} ok, {failed} failed)")
+    print(f"  ({done} ok, {failed} failed, {dropped} dropped [low-res/dup])")
     return done
 
 
@@ -836,18 +1211,19 @@ def rescore(store: Store, threshold: float, delete_junk: bool) -> None:
       file + mark 'skipped'). Downloaded rows that still pass are left as-is.
     """
     rows = store.db.execute(
-        "SELECT key, title, description, tags, status, path FROM videos").fetchall()
+        "SELECT key, title, description, tags, channel, status, path FROM videos").fetchall()
     rejects: list[tuple[str, str, float]] = []  # (path, title, size_mb)
     for r in rows:
         meta = VideoMeta("", "", "", r["title"] or "", r["description"] or "",
-                         json.loads(r["tags"] or "[]"))
-        s = score_metadata(meta)
+                         json.loads(r["tags"] or "[]"), channel=r["channel"] or "")
+        s, terms = score_breakdown(meta)
+        st = json.dumps(terms, ensure_ascii=False)
         keep = s >= threshold
         if r["status"] in ("kept", "skipped"):
-            store.db.execute("UPDATE videos SET score=?, status=? WHERE key=?",
-                             (s, "kept" if keep else "skipped", r["key"]))
+            store.db.execute("UPDATE videos SET score=?, status=?, score_terms=? WHERE key=?",
+                             (s, "kept" if keep else "skipped", st, r["key"]))
         elif r["status"] == "downloaded":
-            store.db.execute("UPDATE videos SET score=? WHERE key=?", (s, r["key"]))
+            store.db.execute("UPDATE videos SET score=?, score_terms=? WHERE key=?", (s, st, r["key"]))
             if not keep:  # downloaded but now fails the tightened engine
                 p = r["path"]
                 size = os.path.getsize(p) / 1e6 if p and os.path.exists(p) else 0.0
@@ -923,34 +1299,93 @@ def enrich(src: YouTubeSource, store: Store) -> None:
     print(f"({len(rows) - updated} rows had no API data — deleted/private videos.)")
 
 
+def dedupe(store: Store, delete: bool) -> None:
+    """Find near-duplicate DOWNLOADED files via perceptual frame hash and report
+    (or delete with --delete-junk). Backfills phash for rows missing it. Keeps
+    the first occurrence of each cluster, flags the rest as duplicates."""
+    rows = store.db.execute(
+        "SELECT key, video_id, title, path, phash FROM videos "
+        "WHERE status='downloaded'").fetchall()
+    # backfill missing phashes from the files on disk
+    backfilled = 0
+    hashes: list[tuple[str, str, str, str]] = []  # (key, title, path, phash)
+    for r in rows:
+        ph = r["phash"]
+        p = r["path"]
+        if (not ph) and p and os.path.exists(p):
+            ph = _frame_dhash(p) or ""
+            if ph:
+                store.db.execute("UPDATE videos SET phash=? WHERE key=?", (ph, r["key"]))
+                backfilled += 1
+        hashes.append((r["key"], r["title"] or "", p or "", ph))
+    store.db.commit()
+
+    kept: list[tuple[str, str, str, str]] = []
+    dups: list[tuple[str, str, str]] = []  # (path, title, matches_key)
+    for key, title, path, ph in hashes:
+        if not ph:
+            kept.append((key, title, path, ph))   # can't hash — keep it
+            continue
+        match = next((k for k, _, _, kph in kept
+                      if _phash_distance(ph, kph) <= PHASH_MAX_DISTANCE), None)
+        if match:
+            dups.append((path, title, match))
+        else:
+            kept.append((key, title, path, ph))
+
+    print(f"scanned {len(rows)} downloaded files; backfilled {backfilled} phashes.")
+    print(f"near-duplicate clusters found: {len(dups)} extra copies")
+    for path, title, match in dups:
+        print(f"  dup of {match}: {title[:60]}")
+    if delete:
+        removed = 0
+        for path, _, _ in dups:
+            if path and os.path.exists(path):
+                os.remove(path)
+                removed += 1
+            store.db.execute(
+                "UPDATE videos SET status='skipped', path=NULL WHERE path=?", (path,))
+        store.db.commit()
+        print(f"\ndeleted {removed} duplicate files, marked them skipped.")
+    elif dups:
+        print("\n(not deleted) re-run with --delete-junk to remove duplicates.")
+
+
 def run(queries: Iterable[str], out_dir: Path, max_per_query: int, threshold: float,
         mode: str, rps: float, refresh_seconds: int, dl: DownloadOpts,
-        delete_junk: bool = False) -> None:
+        delete_junk: bool = False, min_seconds: int = 0, min_height: int = 0,
+        quota_limit: int = 10_000) -> None:
     store = Store(out_dir)
     limiter = RateLimiter(rps)
     scanned = kept = downloaded = 0
+    quota = QuotaMeter(limit=quota_limit)
     try:
         if mode == "rescore":
             rescore(store, threshold, delete_junk)
+            return
+        if mode == "dedupe":
+            dedupe(store, delete_junk)
             return
         if mode == "enrich":
             api_key = os.environ.get("YOUTUBE_API_KEY")
             if not api_key:
                 sys.exit("Set YOUTUBE_API_KEY (enrich needs the API).")
-            enrich(YouTubeSource(api_key, limiter, dl.proxy), store)
+            enrich(YouTubeSource(api_key, limiter, dl.proxy, quota), store)
             return
         if mode in ("discover", "full"):
             api_key = os.environ.get("YOUTUBE_API_KEY")
             if not api_key:
                 sys.exit("Set YOUTUBE_API_KEY (see header of this file).")
-            src = YouTubeSource(api_key, limiter, dl.proxy)
+            src = YouTubeSource(api_key, limiter, dl.proxy, quota)
             try:
                 scanned, kept = discover(src, store, queries, max_per_query,
-                                         threshold, refresh_seconds)
+                                         threshold, refresh_seconds, min_seconds)
             except QuotaExceeded as e:
                 print(f"\n! API quota exhausted, stopping discovery: {e}", file=sys.stderr)
         if mode in ("download", "full"):
-            downloaded = drain_downloads(store, limiter, dl)
+            downloaded = drain_downloads(store, limiter, dl, min_height)
+        if mode in ("discover", "full"):
+            print(f"  (~{quota.used} API units used this run)")
         print(f"\nDone. mode={mode} scanned={scanned} kept={kept} "
               f"downloaded={downloaded} -> {store.manifest}")
     finally:
@@ -968,13 +1403,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
                    help="Min relevance score (0..1) to keep a video.")
     p.add_argument("--mode",
-                   choices=["discover", "download", "full", "eval", "rescore", "enrich"],
+                   choices=["discover", "download", "full", "eval", "rescore",
+                            "enrich", "dedupe", "llm-eval"],
                    default="full",
                    help="discover=search only, download=drain queue, full=both, "
                         "eval=score a labeled CSV, rescore=re-score stored rows "
-                        "(no API), enrich=backfill metadata for existing rows (API).")
+                        "(no API), enrich=backfill metadata for existing rows (API), "
+                        "dedupe=remove near-duplicate downloaded files (no API), "
+                        "llm-eval=classify human-labeled rows with a local LLM "
+                        "(Ollama) and report precision/recall vs the keyword scorer.")
     p.add_argument("--delete-junk", action="store_true",
-                   help="In rescore mode, delete already-downloaded files that now fail.")
+                   help="In rescore/dedupe modes, delete the flagged files.")
+    p.add_argument("--llm-model", default=OLLAMA_MODEL,
+                   help="Ollama model for --mode llm-eval (default gemma3:4b).")
+    p.add_argument("--relabel", action="store_true",
+                   help="In llm-eval, re-classify rows that already have a cached LLM verdict.")
+    p.add_argument("--min-seconds", type=int, default=DEFAULT_MIN_SECONDS,
+                   help="Drop clips shorter than this at discover (0=no floor).")
+    p.add_argument("--min-height", type=int, default=DEFAULT_MIN_HEIGHT,
+                   help="Drop downloads below this resolution height (0=no floor).")
+    p.add_argument("--quota-limit", type=int, default=10_000,
+                   help="Local Data API unit cap per run; stop before overrun (0=off).")
     p.add_argument("--labels", type=Path,
                    help="Labeled CSV for --mode eval (columns: label[,title,description,tags]).")
     p.add_argument("--rps", type=float, default=1.0,
@@ -1007,8 +1456,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                          if ln.strip() and not ln.strip().startswith("#")]
     if args.mode in ("discover", "full") and not args.queries:
         p.error("--query/--query-file is required for mode 'discover'/'full'.")
-    if args.mode == "eval" and not args.labels:
-        p.error("--labels is required for mode 'eval'.")
+    # eval with no --labels falls back to human labels in the DB (label_app.py).
     # cookies.txt wins over browser extraction if both are set (avoid yt-dlp ambiguity)
     if args.cookies and args.cookies_from_browser:
         print("  ~ both cookie sources set - using cookies file, ignoring browser.",
@@ -1030,7 +1478,20 @@ if __name__ == "__main__":
     _load_dotenv()
     a = parse_args()
     if a.mode == "eval":
-        evaluate(a.labels, a.threshold)
+        if a.labels:
+            evaluate(a.labels, a.threshold)
+        else:  # no CSV → evaluate against human labels stored in the DB
+            _store = Store(a.out)
+            try:
+                evaluate_db(_store, a.threshold)
+            finally:
+                _store.close()
+    elif a.mode == "llm-eval":
+        _store = Store(a.out)
+        try:
+            evaluate_llm(_store, a.llm_model, a.threshold, a.relabel)
+        finally:
+            _store.close()
     else:
         smin, _, smax = a.dl_sleep.partition(",")
         dl = DownloadOpts(
@@ -1042,4 +1503,5 @@ if __name__ == "__main__":
             max_height=a.max_height, max_seconds=a.max_seconds,
         )
         run(a.queries, a.out, a.max_per_query, a.threshold, a.mode, a.rps,
-            a.refresh_seconds, dl, a.delete_junk)
+            a.refresh_seconds, dl, a.delete_junk, a.min_seconds, a.min_height,
+            a.quota_limit)

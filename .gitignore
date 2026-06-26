@@ -15,3 +15,8 @@ rescore_rejects.txt
 
 # tooling state
 .omc/
+
+# run logs / scratch artifacts
+OUTDIR/
+gemma_errors.txt
+new_fp.txt

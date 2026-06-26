@@ -1,31 +1,70 @@
 # Residential CCTV / home-security search queries (one per line, # = comment).
 # Run:  python youtube_scraper.py --mode discover --query-file queries.txt
-# Tuned to pull footage FROM home cameras (doorbell, yard, driveway) — not
-# store/traffic/business CCTV.
+#
+# Target: footage to train/test a home-security SEMANTIC VISION pipeline —
+# inside-home + around-home camera feeds, segmented by the pipeline's tasks:
+# baby monitoring, childcare/staff (nanny) compliance, intrusion alerts, animal
+# alerts, and normal indoor/outdoor ambient. NOT store/traffic/business CCTV,
+# NOT wildlife/trail-cam, NOT TV-news, NOT product reviews/specs.
+#
+# NOTE (2026-06-26 hand-label analysis of 567 clips): metadata search only
+# reliably surfaces footage when the TITLE names an EVENT. Ambient/indoor and
+# nanny/staff classes are metadata-thin and arrive mixed with product ads — the
+# vision pass (later) is what filters + class-tags them. Phrasings here avoid
+# ad triggers ("best", "wifi", "for home", "night vision camera") and lean on
+# footage-genre words ("caught on", "footage", "cam catches"). The DB now stores
+# which query surfaced each video (`query` column) — re-run per-query keep-rate
+# after the next label pass and prune the dead queries.
 
-# doorbell / porch
-ring doorbell camera caught
-porch pirate caught on camera
-package thief doorbell camera
-front door security camera footage
-doorbell camera stranger at door
+# === baby / infant monitoring ===
+baby monitor caught footage
+nursery camera footage
+crib camera footage night
+baby monitor night vision footage
 
-# yard / driveway / perimeter
-home security camera backyard
-driveway security camera night
-backyard surveillance camera footage
-front yard security cam caught
-home cctv intruder caught
+# === nanny / childcare / staff compliance (sparse genre — cast wide) ===
+nanny cam caught footage
+nanny camera footage
+babysitter caught on camera
+daycare surveillance footage
+caregiver caught on camera
+hidden camera caught housekeeper
 
-# break-in / trespass at a residence
-home invasion caught on camera
-burglar caught on home security camera
-trespasser caught on house camera
-residential break in cctv footage
-someone broke into my house camera footage
+# === intrusion / person alerts (indoor + perimeter) ===
+home intruder caught on camera
+burglar caught on home camera
+break in caught on security camera
+prowler caught on camera at night
+stranger at the door camera footage
+someone in my house camera footage
 
-# general residential
-nest cam home footage caught
-my home security camera caught
-neighborhood security camera footage
-suburban home cctv caught on camera
+# === animal alerts (home cameras, NOT wildlife/trail-cam) ===
+home security camera caught animal
+my dog on the security camera
+cat caught on home camera
+raccoon on porch camera
+animal triggered security camera footage
+
+# === indoor / ambient everyday interior (metadata-thin → vision will filter) ===
+living room security camera footage
+kitchen security camera footage
+hallway camera footage home
+inside my house camera footage
+home interior security camera footage
+empty house security camera footage
+
+# === outdoor ambient (around the home, no incident) ===
+backyard security camera footage
+driveway camera night footage
+front yard security camera footage
+porch camera footage night
+
+# === doorbell / porch (already over-represented — keep light) ===
+ring doorbell camera footage
+front door camera caught footage
+
+# === continuous / 24-7 home feeds (long event-free interior + exterior) ===
+24/7 home security camera live
+home camera live stream footage
+pet camera live stream home
+backyard camera live continuous
