@@ -108,7 +108,7 @@ Queries live in `queries.txt` (one per line, `#` for comments). A residential-fo
 **1. Discover** — search + score + queue, no downloads (cheap, API-only):
 
 ```bash
-python youtube_scraper.py --mode discover --query-file queries.txt --max-per-query 25
+python youtube_scraper.py --mode discover --query-file queries.txt --max-per-query 50
 ```
 
 **2. Download** — pull the queued videos (heavy, bandwidth):
@@ -189,7 +189,7 @@ Download / anti-bot defaults live in the `DownloadOpts` dataclass and are all ov
 | `--mode` | `full` | `discover` / `download` / `full` / `eval` / `rescore` / `enrich` |
 | `--query "..."` | — | A single query (repeatable) |
 | `--query-file FILE` | — | Load queries from a file |
-| `--max-per-query N` | 25 | Results per query |
+| `--max-per-query N` | 50 | Results per query |
 | `--threshold X` | 0.35 | Min relevance score (0–1) to keep |
 | `--out DIR` | `dataset` | Output directory |
 | `--rps X` | 1.0 | Max outbound requests/sec (token bucket) |

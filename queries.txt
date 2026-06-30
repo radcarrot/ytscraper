@@ -21,6 +21,8 @@ baby monitor caught footage
 nursery camera footage
 crib camera footage night
 baby monitor night vision footage
+things caught on baby monitor
+real footage caught on baby monitor camera
 
 # === nanny / childcare / staff compliance (sparse genre — cast wide) ===
 nanny cam caught footage
@@ -29,6 +31,8 @@ babysitter caught on camera
 daycare surveillance footage
 caregiver caught on camera
 hidden camera caught housekeeper
+moments caught on nanny cam
+hidden camera caught house cleaner
 
 # === intrusion / person alerts (indoor + perimeter) ===
 home intruder caught on camera
@@ -37,6 +41,8 @@ break in caught on security camera
 prowler caught on camera at night
 stranger at the door camera footage
 someone in my house camera footage
+caught in 4k home security camera
+moments caught on home security camera
 
 # === animal alerts (home cameras, NOT wildlife/trail-cam) ===
 home security camera caught animal
@@ -44,14 +50,15 @@ my dog on the security camera
 cat caught on home camera
 raccoon on porch camera
 animal triggered security camera footage
+dog home alone caught on camera
+furbo dog camera caught
 
 # === indoor / ambient everyday interior (metadata-thin → vision will filter) ===
-living room security camera footage
+# PRUNED 2026-06-30 (0% keep on labeled haul, N>=2 — text search returns product
+# ads/idle streams, not interior footage; ambient class now sourced via datasets +
+# vision pass, NOT queries): living room / hallway / inside my house / home interior
+# / empty house security camera footage. Kept kitchen (3/3 keep).
 kitchen security camera footage
-hallway camera footage home
-inside my house camera footage
-home interior security camera footage
-empty house security camera footage
 
 # === outdoor ambient (around the home, no incident) ===
 backyard security camera footage
@@ -60,11 +67,13 @@ front yard security camera footage
 porch camera footage night
 
 # === doorbell / porch (already over-represented — keep light) ===
-ring doorbell camera footage
+# PRUNED 2026-06-30: ring doorbell camera footage (0/3 keep — pulls product/unboxing).
 front door camera caught footage
 
 # === continuous / 24-7 home feeds (long event-free interior + exterior) ===
-24/7 home security camera live
-home camera live stream footage
+# PRUNED 2026-06-30 (0% keep — live/24-7/continuous phrasing returns idle product
+# streams, no footage): 24/7 home security camera live / home camera live stream
+# footage. pet camera live stream home (1/3) and backyard camera live continuous
+# (scorer 0/7) on probation — drop next pass if still dead.
 pet camera live stream home
 backyard camera live continuous

@@ -28,7 +28,7 @@ Run
 ---
     # dry scoring run (no download), default combined mode:
     python youtube_scraper.py --query "package thief caught on camera" \
-        --query "doorbell camera porch" --max-per-query 25 --threshold 0.35
+        --query "doorbell camera porch" --max-per-query 50 --threshold 0.35
 
     # decoupled: discover cheaply now, download later (e.g. on another node):
     python youtube_scraper.py --mode discover --query "ring doorbell intruder"
@@ -1399,7 +1399,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--query-file", type=Path,
                    help="Text file of queries, one per line (# comments allowed).")
     p.add_argument("--out", default="dataset", type=Path, help="Output directory.")
-    p.add_argument("--max-per-query", type=int, default=25)
+    p.add_argument("--max-per-query", type=int, default=50)
     p.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
                    help="Min relevance score (0..1) to keep a video.")
     p.add_argument("--mode",

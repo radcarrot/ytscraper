@@ -89,4 +89,4 @@ phrasing; avoids ad triggers (best/wifi/for home/night-vision-camera).
 ## Modes / tooling
 discover/download/full/eval/rescore/enrich/dedupe/llm-eval. `--min-seconds`,
 `--min-height`, `--quota-limit`, `--llm-model`, `--relabel`, `OLLAMA_NUM_GPU` env.
-`--max-per-query` (default **25** — raise to 50 for depth). `--query-file queries.txt`.
+`--max-per-query` (default **50** — was 25; raised for depth). `--query-file queries.txt`.
